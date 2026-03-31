@@ -22,6 +22,9 @@ type Gate struct {
 	// ReviewFunc is called when interactive review is needed.
 	// Returns verdict ("approve", "deny", "run", "block") and whether to attest.
 	ReviewFunc func(script []byte, untrusted []rekor.Attestation, stderr io.Writer) (string, bool, string, error)
+	// AttestFunc is called to sign and publish an attestation to Rekor.
+	// Parameters: script hash, verdict, reason, stderr writer.
+	AttestFunc func(hash, verdict, reason string, stderr io.Writer) error
 }
 
 // New creates a new Gate with default configuration.
@@ -169,19 +172,24 @@ func (g *Gate) handleReview(input []byte, hash string, untrusted []rekor.Attesta
 		switch verdict {
 		case "approve":
 			source := "local"
-			if attest {
-				source = "attested"
-				// TODO: sign and submit to Rekor
-				fmt.Fprintln(stderr, "portcullis: attestation signing not yet implemented, caching locally")
+			if attest && g.AttestFunc != nil {
+				if err := g.AttestFunc(hash, "approve", "", stderr); err != nil {
+					fmt.Fprintf(stderr, "portcullis: attestation failed: %v (caching locally)\n", err)
+				} else {
+					source = "attested"
+				}
 			}
 			g.cacheDecision(hash, "approve", source, "", "")
 			_, err := stdout.Write(input)
 			return err
 		case "deny":
 			source := "local"
-			if attest {
-				source = "attested"
-				fmt.Fprintln(stderr, "portcullis: attestation signing not yet implemented, caching locally")
+			if attest && g.AttestFunc != nil {
+				if err := g.AttestFunc(hash, "deny", reason, stderr); err != nil {
+					fmt.Fprintf(stderr, "portcullis: attestation failed: %v (caching locally)\n", err)
+				} else {
+					source = "attested"
+				}
 			}
 			g.cacheDecision(hash, "deny", source, "", reason)
 			return fmt.Errorf("blocked by user")

@@ -10,14 +10,14 @@ import (
 
 var queryCmd = &cobra.Command{
 	Use:   "query <sha256:hash>",
-	Short: "Query attestations for a script hash",
+	Short: "Query Rekor for attestations on a script hash",
+	Long:  "Search the Rekor transparency log for all attestations matching the given script hash.",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		hash := args[0]
-		hash = strings.TrimPrefix(hash, "sha256:")
+		hash := strings.TrimPrefix(args[0], "sha256:")
 
 		client := rekor.NewClient()
-		fmt.Fprintf(cmd.ErrOrStderr(), "Querying attestations for sha256:%s...\n", hash)
+		fmt.Fprintf(cmd.ErrOrStderr(), "Querying Rekor for sha256:%s...\n", hash)
 
 		result := client.Query(hash)
 		if result.Err != nil {
@@ -29,6 +29,7 @@ var queryCmd = &cobra.Command{
 			return nil
 		}
 
+		fmt.Fprintf(cmd.ErrOrStderr(), "Found %d attestation(s):\n", len(result.Attestations))
 		for _, att := range result.Attestations {
 			fmt.Fprintf(cmd.ErrOrStderr(), "  %s by %s (%s)",
 				att.Verdict, att.Identity, att.Timestamp.Format("2006-01-02"))
