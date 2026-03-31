@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/imjasonh/portcullis/internal/gate"
+	"github.com/imjasonh/portcullis/internal/review"
 	"github.com/spf13/cobra"
 )
 
@@ -14,8 +15,7 @@ var rootCmd = &cobra.Command{
 	Use:   "portcullis",
 	Short: "Inspect and gate piped shell scripts before execution",
 	Long:  "Portcullis interposes in shell script execution pipelines to verify trust before allowing execution.",
-	// When invoked with no subcommand, run in pipe mode.
-	RunE: runPipeMode,
+	RunE:  runPipeMode,
 }
 
 func init() {
@@ -27,7 +27,6 @@ func init() {
 
 // Execute runs the root command.
 func Execute() error {
-	// If invoked as "pc", run pipe mode directly.
 	base := filepath.Base(os.Args[0])
 	if base == "pc" {
 		return runPipeMode(rootCmd, nil)
@@ -36,7 +35,6 @@ func Execute() error {
 }
 
 func runPipeMode(cmd *cobra.Command, args []string) error {
-	// Read all of stdin.
 	input, err := io.ReadAll(os.Stdin)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "portcullis: failed to read stdin: %v\n", err)
@@ -48,11 +46,14 @@ func runPipeMode(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("empty input")
 	}
 
-	// Try to create a fully configured gate; fall back to basic mode.
 	g, err := gate.NewWithConfig("")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "portcullis: using basic mode: %v\n", err)
 		g = gate.New()
 	}
+
+	// Wire in interactive review.
+	g.ReviewFunc = review.InteractiveReview
+
 	return g.Run(input, os.Stdout, os.Stderr)
 }

@@ -3,6 +3,7 @@ package gate
 import (
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/imjasonh/portcullis/internal/rekor"
 	"github.com/imjasonh/portcullis/internal/trust"
@@ -119,6 +120,9 @@ func printUntrustedContext(attestations []rekor.Attestation, stderr io.Writer) {
 func pluralize(word string, count int) string {
 	if count == 1 {
 		return word
+	}
+	if strings.HasSuffix(word, "y") {
+		return word[:len(word)-1] + "ies"
 	}
 	return word + "s"
 }
