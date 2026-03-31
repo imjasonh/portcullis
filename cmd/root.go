@@ -48,6 +48,11 @@ func runPipeMode(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("empty input")
 	}
 
-	g := gate.New()
+	// Try to create a fully configured gate; fall back to basic mode.
+	g, err := gate.NewWithConfig("")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "portcullis: using basic mode: %v\n", err)
+		g = gate.New()
+	}
 	return g.Run(input, os.Stdout, os.Stderr)
 }

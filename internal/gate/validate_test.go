@@ -46,7 +46,6 @@ func TestValidate_HTMLErrorPage(t *testing.T) {
 }
 
 func TestValidate_MalformedShell(t *testing.T) {
-	// Has shell keywords but invalid syntax.
 	script := []byte("#!/bin/bash\nif true; then\necho missing fi\n")
 	var stderr bytes.Buffer
 	if err := Validate(script, &stderr); err == nil {
@@ -57,7 +56,6 @@ func TestValidate_MalformedShell(t *testing.T) {
 func TestComputeHash(t *testing.T) {
 	data := []byte("hello\n")
 	hash := ComputeHash(data)
-	// sha256("hello\n") = 5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03
 	expected := "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03"
 	if hash != expected {
 		t.Errorf("expected hash %s, got %s", expected, hash)

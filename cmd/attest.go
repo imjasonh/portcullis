@@ -2,7 +2,9 @@ package cmd
 
 import (
 	"fmt"
+	"strings"
 
+	"github.com/imjasonh/portcullis/internal/rekor"
 	"github.com/spf13/cobra"
 )
 
@@ -21,14 +23,22 @@ var attestCmd = &cobra.Command{
 			return fmt.Errorf("specify exactly one of --approve or --deny")
 		}
 
-		hash := args[0]
+		hash := strings.TrimPrefix(args[0], "sha256:")
 		verdict := "approve"
 		if attestDeny {
 			verdict = "deny"
 		}
 
-		// TODO: Sigstore signing + Rekor submission (Phase 2)
-		fmt.Fprintf(cmd.ErrOrStderr(), "Attestation recorded: %s %s\n", verdict, hash)
+		att := rekor.NewAttestation(hash, verdict, "", attestReason)
+		client := rekor.NewClient()
+
+		if err := client.Submit(att); err != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: %v\n", err)
+			fmt.Fprintln(cmd.ErrOrStderr(), "Attestation created locally but not published to Rekor.")
+		} else {
+			fmt.Fprintf(cmd.ErrOrStderr(), "Attestation published: %s sha256:%s\n", verdict, hash)
+		}
+
 		if attestReason != "" {
 			fmt.Fprintf(cmd.ErrOrStderr(), "Reason: %s\n", attestReason)
 		}
