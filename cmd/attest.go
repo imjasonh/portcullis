@@ -2,8 +2,6 @@ package cmd
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/base64"
 	"fmt"
 	"os"
 	"strings"
@@ -23,7 +21,7 @@ var (
 var attestCmd = &cobra.Command{
 	Use:   "attest <sha256:hash>",
 	Short: "Manually attest to approve or deny a script hash",
-	Long:  "Sign a positive or negative attestation for a script hash and publish it to the Rekor transparency log.",
+	Long:  "Sign a positive or negative attestation for a script hash and publish it to the Rekor transparency log via Sigstore.",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if attestApprove == attestDeny {
@@ -42,7 +40,7 @@ var attestCmd = &cobra.Command{
 			return fmt.Errorf("authentication required for attestation: %w", err)
 		}
 
-		// Create and sign the attestation.
+		// Create and sign the attestation via sigstore-go.
 		payload := sigstore.AttestationPayload{
 			Type:       rekor.AttestationType,
 			ScriptHash: hash,
@@ -51,25 +49,11 @@ var attestCmd = &cobra.Command{
 			Timestamp:  time.Now().UTC(),
 		}
 
-		result, err := sigstore.SignAttestation(context.Background(), payload, token.RawString, os.Stderr)
-		if err != nil {
+		if err := sigstore.SignAndPublish(context.Background(), payload, token.RawString, os.Stderr); err != nil {
 			return fmt.Errorf("signing attestation: %w", err)
 		}
 
-		// Submit to Rekor.
-		contentHash := sha256.Sum256(result.Content)
-		contentHashHex := fmt.Sprintf("%x", contentHash[:])
-		signatureB64 := base64.StdEncoding.EncodeToString(result.Signature)
-
-		fmt.Fprintln(os.Stderr, "Submitting to Rekor transparency log...")
-		client := rekor.NewClient()
-		uuid, err := client.Submit(contentHashHex, signatureB64, result.CertPEM)
-		if err != nil {
-			return fmt.Errorf("rekor submission: %w", err)
-		}
-
 		fmt.Fprintf(os.Stderr, "Attestation published: %s sha256:%s by %s\n", verdict, hash, token.Subject)
-		fmt.Fprintf(os.Stderr, "Rekor entry: %s\n", uuid)
 		if attestReason != "" {
 			fmt.Fprintf(os.Stderr, "Reason: %s\n", attestReason)
 		}

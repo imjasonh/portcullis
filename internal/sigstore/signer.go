@@ -1,24 +1,13 @@
 package sigstore
 
 import (
-	"bytes"
 	"context"
-	"crypto"
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
-	"crypto/sha256"
-	"crypto/x509"
-	"encoding/base64"
 	"encoding/json"
-	"encoding/pem"
 	"fmt"
 	"io"
-	"net/http"
-	"strings"
 	"time"
 
-	"github.com/sigstore/sigstore/pkg/cryptoutils"
+	"github.com/sigstore/sigstore-go/pkg/sign"
 	"github.com/sigstore/sigstore/pkg/oauthflow"
 )
 
@@ -29,6 +18,8 @@ const (
 	SigstoreOIDCClientID = "sigstore"
 	// FulcioURL is the public Fulcio instance.
 	FulcioURL = "https://fulcio.sigstore.dev"
+	// RekorURL is the public Rekor instance.
+	RekorURL = "https://rekor.sigstore.dev"
 
 	// AttestationPayloadType is the DSSE payload type for portcullis attestations.
 	AttestationPayloadType = "application/vnd.portcullis.attestation.v1+json"
@@ -41,13 +32,6 @@ type AttestationPayload struct {
 	Verdict    string    `json:"verdict"`
 	Reason     string    `json:"reason,omitempty"`
 	Timestamp  time.Time `json:"timestamp"`
-}
-
-// SigningResult holds the output of a signing operation.
-type SigningResult struct {
-	Signature []byte // DER-encoded ECDSA signature
-	CertPEM   []byte // PEM-encoded Fulcio signing certificate
-	Content   []byte // The signed content (attestation JSON)
 }
 
 // Authenticate performs the Sigstore OIDC flow and returns an ID token.
@@ -67,168 +51,49 @@ func Authenticate(stderr io.Writer) (*oauthflow.OIDCIDToken, error) {
 	return token, nil
 }
 
-// SignAttestation signs an attestation payload with an ephemeral key and obtains
-// a Fulcio certificate. Returns the signing result for Rekor submission.
-func SignAttestation(ctx context.Context, payload AttestationPayload, idToken string, stderr io.Writer) (*SigningResult, error) {
+// SignAndPublish signs an attestation payload using sigstore-go's Bundle flow:
+// ephemeral keypair → Fulcio certificate → Rekor transparency log entry.
+// The signed bundle is self-contained and publicly auditable.
+func SignAndPublish(ctx context.Context, payload AttestationPayload, idToken string, stderr io.Writer) error {
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
-		return nil, fmt.Errorf("marshaling attestation: %w", err)
+		return fmt.Errorf("marshaling attestation: %w", err)
 	}
 
-	// Generate ephemeral ECDSA keypair.
-	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	// Create ephemeral ECDSA P-256 keypair (used once, then discarded).
+	keypair, err := sign.NewEphemeralKeypair(nil)
 	if err != nil {
-		return nil, fmt.Errorf("generating keypair: %w", err)
+		return fmt.Errorf("creating ephemeral keypair: %w", err)
 	}
 
-	// Sign the attestation content.
-	digest := sha256.Sum256(payloadBytes)
-	signature, err := privateKey.Sign(rand.Reader, digest[:], crypto.SHA256)
-	if err != nil {
-		return nil, fmt.Errorf("signing: %w", err)
-	}
+	// The attestation payload is the content to sign.
+	// Using PlainData creates a hashedrekord entry in Rekor, indexed by the
+	// SHA-256 of the payload (which contains the script hash).
+	content := &sign.PlainData{Data: payloadBytes}
 
-	// Get a Fulcio signing certificate.
-	fmt.Fprintln(stderr, "portcullis: requesting signing certificate from Fulcio...")
-	certPEM, err := getFulcioCert(ctx, privateKey, idToken)
-	if err != nil {
-		return nil, fmt.Errorf("fulcio certificate: %w", err)
-	}
+	// Fulcio: get a short-lived signing certificate bound to the OIDC identity.
+	fulcio := sign.NewFulcio(&sign.FulcioOptions{
+		BaseURL: FulcioURL,
+	})
 
-	fmt.Fprintln(stderr, "portcullis: attestation signed successfully")
-	return &SigningResult{
-		Signature: signature,
-		CertPEM:   certPEM,
-		Content:   payloadBytes,
-	}, nil
-}
+	// Rekor: log the signed entry to the transparency log.
+	rekor := sign.NewRekor(&sign.RekorOptions{
+		BaseURL: RekorURL,
+	})
 
-// fulcioCertRequest is the request body for Fulcio's /api/v2/signingCert endpoint.
-type fulcioCertRequest struct {
-	PublicKeyRequest publicKeyRequest `json:"publicKeyRequest"`
-}
-
-type publicKeyRequest struct {
-	PublicKey         publicKey `json:"publicKey"`
-	ProofOfPossession string    `json:"proofOfPossession"`
-}
-
-type publicKey struct {
-	Algorithm string `json:"algorithm"`
-	Content   string `json:"content"`
-}
-
-type fulcioResponse struct {
-	SctCertWithChain signedCertificateEmbeddedSct `json:"signedCertificateEmbeddedSct"`
-}
-
-type signedCertificateEmbeddedSct struct {
-	Chain chain `json:"chain"`
-}
-
-type chain struct {
-	Certificates []string `json:"certificates"`
-}
-
-// getFulcioCert requests a signing certificate from Fulcio using the ephemeral key and OIDC token.
-func getFulcioCert(ctx context.Context, privateKey *ecdsa.PrivateKey, idToken string) ([]byte, error) {
-	// Extract subject from token for proof of possession.
-	tokenParts := strings.Split(idToken, ".")
-	if len(tokenParts) < 2 {
-		return nil, fmt.Errorf("invalid identity token format")
-	}
-
-	jwtPayload, err := base64.RawURLEncoding.DecodeString(tokenParts[1])
-	if err != nil {
-		return nil, fmt.Errorf("decoding token payload: %w", err)
-	}
-
-	subject, err := oauthflow.SubjectFromUnverifiedToken(jwtPayload)
-	if err != nil {
-		return nil, fmt.Errorf("extracting subject: %w", err)
-	}
-
-	// Sign the subject as proof of possession.
-	subjectDigest := sha256.Sum256([]byte(subject))
-	proofSig, err := privateKey.Sign(rand.Reader, subjectDigest[:], crypto.SHA256)
-	if err != nil {
-		return nil, fmt.Errorf("signing proof of possession: %w", err)
-	}
-
-	// Marshal the public key.
-	pubKeyPEM, err := cryptoutils.MarshalPublicKeyToPEM(privateKey.Public())
-	if err != nil {
-		return nil, fmt.Errorf("marshaling public key: %w", err)
-	}
-
-	// Build the Fulcio request.
-	certReq := fulcioCertRequest{
-		PublicKeyRequest: publicKeyRequest{
-			PublicKey: publicKey{
-				Algorithm: "ECDSA",
-				Content:   string(pubKeyPEM),
-			},
-			ProofOfPossession: base64.StdEncoding.EncodeToString(proofSig),
+	fmt.Fprintln(stderr, "portcullis: signing attestation via Sigstore (Fulcio + Rekor)...")
+	_, err = sign.Bundle(content, keypair, sign.BundleOptions{
+		Context:             ctx,
+		CertificateProvider: fulcio,
+		CertificateProviderOptions: &sign.CertificateProviderOptions{
+			IDToken: idToken,
 		},
-	}
-
-	reqBody, err := json.Marshal(certReq)
+		TransparencyLogs: []sign.Transparency{rekor},
+	})
 	if err != nil {
-		return nil, fmt.Errorf("marshaling request: %w", err)
+		return fmt.Errorf("signing bundle: %w", err)
 	}
 
-	// Call Fulcio.
-	req, err := http.NewRequestWithContext(ctx, "POST", FulcioURL+"/api/v2/signingCert", bytes.NewReader(reqBody))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+idToken)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("fulcio request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("reading fulcio response: %w", err)
-	}
-
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("fulcio returned %d: %s", resp.StatusCode, string(body))
-	}
-
-	var fulcioResp fulcioResponse
-	if err := json.Unmarshal(body, &fulcioResp); err != nil {
-		return nil, fmt.Errorf("parsing fulcio response: %w", err)
-	}
-
-	certs := fulcioResp.SctCertWithChain.Chain.Certificates
-	if len(certs) == 0 {
-		return nil, fmt.Errorf("fulcio returned no certificates")
-	}
-
-	// Verify the certificate contains our public key.
-	block, _ := pem.Decode([]byte(certs[0]))
-	if block == nil {
-		return nil, fmt.Errorf("unable to parse Fulcio certificate PEM")
-	}
-
-	cert, err := x509.ParseCertificate(block.Bytes)
-	if err != nil {
-		return nil, fmt.Errorf("parsing Fulcio certificate: %w", err)
-	}
-
-	certPubKey, ok := cert.PublicKey.(*ecdsa.PublicKey)
-	if !ok {
-		return nil, fmt.Errorf("unexpected certificate public key type: %T", cert.PublicKey)
-	}
-
-	if !certPubKey.Equal(privateKey.Public()) {
-		return nil, fmt.Errorf("fulcio certificate does not match our keypair")
-	}
-
-	return []byte(certs[0]), nil
+	fmt.Fprintln(stderr, "portcullis: attestation signed and logged to Rekor")
+	return nil
 }

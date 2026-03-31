@@ -1,32 +1,33 @@
 package cache
 
 import (
-	"database/sql"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
-
-	_ "github.com/mattn/go-sqlite3"
 )
 
 // Decision represents a cached verdict for a script hash.
 type Decision struct {
-	ScriptHash string
-	Verdict    string // "approve" or "deny"
-	Source     string // "local" or "attested"
-	Identity   string
-	Reason     string
-	CreatedAt  time.Time
-	ExpiresAt  time.Time
+	ScriptHash string    `json:"script_hash"`
+	Verdict    string    `json:"verdict"`
+	Source     string    `json:"source"`
+	Identity   string    `json:"identity,omitempty"`
+	Reason     string    `json:"reason,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+	ExpiresAt  time.Time `json:"expires_at"`
 }
 
-// Cache provides local caching of script decisions in SQLite.
+// Cache provides local caching of script decisions backed by a JSON file.
 type Cache struct {
-	db  *sql.DB
-	ttl time.Duration
+	path    string
+	ttl     time.Duration
+	entries map[string]Decision
+	mu      sync.Mutex
 }
 
-// Open opens or creates the cache database.
+// Open opens or creates the cache file.
 func Open(configDir string, ttl time.Duration) (*Cache, error) {
 	if configDir == "" {
 		configDir = defaultConfigDir()
@@ -35,82 +36,54 @@ func Open(configDir string, ttl time.Duration) (*Cache, error) {
 		return nil, err
 	}
 
-	dbPath := filepath.Join(configDir, "cache.db")
-	db, err := sql.Open("sqlite3", dbPath)
-	if err != nil {
+	c := &Cache{
+		path:    filepath.Join(configDir, "cache.json"),
+		ttl:     ttl,
+		entries: make(map[string]Decision),
+	}
+
+	if err := c.load(); err != nil {
 		return nil, err
 	}
 
-	// Create schema (this also creates the file).
-	if _, err := db.Exec(createTableSQL); err != nil {
-		db.Close()
-		return nil, err
-	}
-
-	// Set file permissions after file is created.
-	if err := os.Chmod(dbPath, 0600); err != nil {
-		db.Close()
-		return nil, err
-	}
-
-	return &Cache{db: db, ttl: ttl}, nil
+	return c, nil
 }
 
 // Lookup checks the cache for a valid (non-expired) decision.
 func (c *Cache) Lookup(scriptHash string) (*Decision, error) {
-	now := time.Now().Unix()
-	row := c.db.QueryRow(
-		`SELECT script_hash, verdict, source, identity, reason, created_at, expires_at
-		 FROM decisions WHERE script_hash = ? AND expires_at > ?`,
-		scriptHash, now,
-	)
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
-	var d Decision
-	var createdAt, expiresAt int64
-	var identity, reason sql.NullString
-	err := row.Scan(&d.ScriptHash, &d.Verdict, &d.Source, &identity, &reason, &createdAt, &expiresAt)
-	if err == sql.ErrNoRows {
+	d, ok := c.entries[scriptHash]
+	if !ok {
 		return nil, nil
 	}
-	if err != nil {
-		return nil, err
+
+	if time.Now().After(d.ExpiresAt) {
+		return nil, nil
 	}
 
-	d.Identity = identity.String
-	d.Reason = reason.String
-	d.CreatedAt = time.Unix(createdAt, 0)
-	d.ExpiresAt = time.Unix(expiresAt, 0)
 	return &d, nil
 }
 
 // LookupExpired returns a decision even if expired (for fallback when Rekor is unreachable).
 func (c *Cache) LookupExpired(scriptHash string) (*Decision, error) {
-	row := c.db.QueryRow(
-		`SELECT script_hash, verdict, source, identity, reason, created_at, expires_at
-		 FROM decisions WHERE script_hash = ?`,
-		scriptHash,
-	)
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
-	var d Decision
-	var createdAt, expiresAt int64
-	var identity, reason sql.NullString
-	err := row.Scan(&d.ScriptHash, &d.Verdict, &d.Source, &identity, &reason, &createdAt, &expiresAt)
-	if err == sql.ErrNoRows {
+	d, ok := c.entries[scriptHash]
+	if !ok {
 		return nil, nil
 	}
-	if err != nil {
-		return nil, err
-	}
 
-	d.Identity = identity.String
-	d.Reason = reason.String
-	d.CreatedAt = time.Unix(createdAt, 0)
-	d.ExpiresAt = time.Unix(expiresAt, 0)
 	return &d, nil
 }
 
 // Store saves a decision to the cache.
 func (c *Cache) Store(d Decision) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	now := time.Now()
 	if d.CreatedAt.IsZero() {
 		d.CreatedAt = now
@@ -119,26 +92,41 @@ func (c *Cache) Store(d Decision) error {
 		d.ExpiresAt = now.Add(c.ttl)
 	}
 
-	_, err := c.db.Exec(
-		`INSERT OR REPLACE INTO decisions (script_hash, verdict, source, identity, reason, created_at, expires_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		d.ScriptHash, d.Verdict, d.Source,
-		nullString(d.Identity), nullString(d.Reason),
-		d.CreatedAt.Unix(), d.ExpiresAt.Unix(),
-	)
-	return err
+	c.entries[d.ScriptHash] = d
+	return c.save()
 }
 
-// Close closes the database connection.
+// Close is a no-op for the JSON cache (kept for interface compatibility).
 func (c *Cache) Close() error {
-	return c.db.Close()
+	return nil
 }
 
-func nullString(s string) sql.NullString {
-	if s == "" {
-		return sql.NullString{}
+func (c *Cache) load() error {
+	data, err := os.ReadFile(c.path)
+	if os.IsNotExist(err) {
+		return nil
 	}
-	return sql.NullString{String: s, Valid: true}
+	if err != nil {
+		return err
+	}
+
+	var entries map[string]Decision
+	if err := json.Unmarshal(data, &entries); err != nil {
+		// Corrupted cache — start fresh.
+		c.entries = make(map[string]Decision)
+		return nil
+	}
+
+	c.entries = entries
+	return nil
+}
+
+func (c *Cache) save() error {
+	data, err := json.Marshal(c.entries)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(c.path, data, 0600)
 }
 
 func defaultConfigDir() string {

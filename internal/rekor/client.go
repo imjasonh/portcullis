@@ -8,8 +8,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/go-openapi/strfmt"
-	"github.com/go-openapi/swag"
 	rekorclient "github.com/sigstore/rekor/pkg/client"
 	"github.com/sigstore/rekor/pkg/generated/client/entries"
 	"github.com/sigstore/rekor/pkg/generated/client/index"
@@ -80,56 +78,6 @@ func (c *Client) Query(hash string) QueryResult {
 	}
 
 	return QueryResult{Attestations: attestations}
-}
-
-// Submit uploads a hashedrekord entry to Rekor.
-// signatureB64 is the base64-encoded signature, certPEM is the signing certificate,
-// and hash is the SHA-256 hex digest of the signed content.
-func (c *Client) Submit(hash string, signatureB64 string, certPEM []byte) (string, error) {
-	rekorAPI, err := rekorclient.GetRekorClient(c.baseURL)
-	if err != nil {
-		return "", fmt.Errorf("creating rekor client: %w", err)
-	}
-
-	// Build a hashedrekord entry.
-	hashAlg := "sha256"
-	re := &models.Hashedrekord{
-		APIVersion: swag.String("0.0.1"),
-		Spec: &models.HashedrekordV001Schema{
-			Data: &models.HashedrekordV001SchemaData{
-				Hash: &models.HashedrekordV001SchemaDataHash{
-					Algorithm: &hashAlg,
-					Value:     &hash,
-				},
-			},
-			Signature: &models.HashedrekordV001SchemaSignature{
-				Content: strfmt.Base64(mustDecodeB64(signatureB64)),
-				PublicKey: &models.HashedrekordV001SchemaSignaturePublicKey{
-					Content: strfmt.Base64(certPEM),
-				},
-			},
-		},
-	}
-
-	params := entries.NewCreateLogEntryParams()
-	params.SetProposedEntry(re)
-
-	resp, err := rekorAPI.Entries.CreateLogEntry(params)
-	if err != nil {
-		return "", fmt.Errorf("creating rekor entry: %w", err)
-	}
-
-	// Extract the entry UUID from the response.
-	for uuid := range resp.Payload {
-		return uuid, nil
-	}
-
-	return "", fmt.Errorf("empty rekor response")
-}
-
-func mustDecodeB64(s string) []byte {
-	b, _ := base64.StdEncoding.DecodeString(s)
-	return b
 }
 
 // entriesAPI is the interface for the Rekor entries client.
