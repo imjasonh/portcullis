@@ -21,6 +21,7 @@ const (
 type DecisionResult struct {
 	Verdict       Verdict
 	Reason        string
+	Identity      string              // identity that drove the decision (for cache)
 	TrustedBy     []rekor.Attestation // trusted attestations that informed the decision
 	Untrusted     []rekor.Attestation // unknown attestations shown as context
 }
@@ -48,6 +49,7 @@ func Decide(attestations []rekor.Attestation, trustStore *trust.Store, stderr io
 			return DecisionResult{
 				Verdict:   VerdictDeny,
 				Reason:    reason,
+				Identity:  att.Identity,
 				TrustedBy: trusted,
 				Untrusted: untrusted,
 			}
@@ -62,6 +64,7 @@ func Decide(attestations []rekor.Attestation, trustStore *trust.Store, stderr io
 			return DecisionResult{
 				Verdict:   VerdictApprove,
 				Reason:    fmt.Sprintf("approved by %s", att.Identity),
+				Identity:  att.Identity,
 				TrustedBy: trusted,
 				Untrusted: untrusted,
 			}

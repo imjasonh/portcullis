@@ -2,6 +2,7 @@ package gate
 
 import (
 	"bytes"
+	"os/exec"
 	"testing"
 )
 
@@ -50,6 +51,23 @@ func TestValidate_MalformedShell(t *testing.T) {
 	var stderr bytes.Buffer
 	if err := Validate(script, &stderr); err == nil {
 		t.Error("expected malformed shell to be blocked")
+	}
+}
+
+func TestBashSyntaxCheck_BashMissing(t *testing.T) {
+	// Simulate bash being unavailable by using an empty PATH.
+	t.Setenv("PATH", t.TempDir())
+	if _, err := exec.LookPath("bash"); err == nil {
+		t.Skip("bash still found on modified PATH")
+	}
+	script := []byte("#!/bin/bash\necho hello\n")
+	err := bashSyntaxCheck(script)
+	if err == nil {
+		t.Error("expected error when bash is not available")
+	}
+	// Should contain a meaningful error, not an empty string.
+	if err.Error() == "" {
+		t.Error("expected non-empty error message")
 	}
 }
 

@@ -2,6 +2,7 @@ package review
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -9,6 +10,9 @@ import (
 
 	"github.com/imjasonh/portcullis/internal/rekor"
 )
+
+// ErrNoTTY is returned when /dev/tty is unavailable for interactive review.
+var ErrNoTTY = errors.New("no interactive terminal available")
 
 // Result holds the user's review decision.
 type Result struct {
@@ -22,7 +26,7 @@ type Result struct {
 func InteractiveReview(script []byte, untrusted []rekor.Attestation, stderr io.Writer) (string, bool, string, error) {
 	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
 	if err != nil {
-		return "", false, "", fmt.Errorf("cannot open /dev/tty for interactive review: %w", err)
+		return "", false, "", ErrNoTTY
 	}
 	defer tty.Close()
 

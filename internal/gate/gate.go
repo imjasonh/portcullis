@@ -2,12 +2,14 @@ package gate
 
 import (
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
 	"time"
 
 	"github.com/imjasonh/portcullis/internal/cache"
 	"github.com/imjasonh/portcullis/internal/config"
+	"github.com/imjasonh/portcullis/internal/review"
 	"github.com/imjasonh/portcullis/internal/rekor"
 	"github.com/imjasonh/portcullis/internal/trust"
 )
@@ -112,7 +114,7 @@ func (g *Gate) Run(input []byte, stdout io.Writer, stderr io.Writer) error {
 				fmt.Fprintln(stderr, "portcullis: trusted approval found, but policy requires review")
 				return g.handleReview(input, hash, result.Untrusted, rekorFailed, stdout, stderr)
 			}
-			if err := g.cacheDecision(hash, "approve", "attested", "", ""); err != nil {
+			if err := g.cacheDecision(hash, "approve", "attested", result.Identity, ""); err != nil {
 				fmt.Fprintf(stderr, "portcullis: warning: failed to cache decision: %v\n", err)
 			}
 			_, err := stdout.Write(input)
@@ -122,13 +124,13 @@ func (g *Gate) Run(input []byte, stdout io.Writer, stderr io.Writer) error {
 			// Apply on_negative policy: "warn" logs warning but passes through instead of blocking.
 			if g.Policy.OnNegative == "warn" {
 				fmt.Fprintf(stderr, "portcullis: WARNING — %s (passing through per policy)\n", result.Reason)
-				if err := g.cacheDecision(hash, "deny", "attested", "", result.Reason); err != nil {
+				if err := g.cacheDecision(hash, "deny", "attested", result.Identity, result.Reason); err != nil {
 					fmt.Fprintf(stderr, "portcullis: warning: failed to cache decision: %v\n", err)
 				}
 				_, err := stdout.Write(input)
 				return err
 			}
-			if err := g.cacheDecision(hash, "deny", "attested", "", result.Reason); err != nil {
+			if err := g.cacheDecision(hash, "deny", "attested", result.Identity, result.Reason); err != nil {
 				fmt.Fprintf(stderr, "portcullis: warning: failed to cache decision: %v\n", err)
 			}
 			return fmt.Errorf("blocked: %s", result.Reason)
@@ -188,6 +190,11 @@ func (g *Gate) handleReview(input []byte, hash string, untrusted []rekor.Attesta
 	if g.ReviewFunc != nil {
 		verdict, attest, reason, err := g.ReviewFunc(input, untrusted, stderr)
 		if err != nil {
+			// If no TTY is available, fall through to default-block below.
+			if errors.Is(err, review.ErrNoTTY) {
+				fmt.Fprintln(stderr, "portcullis: no interactive terminal available, blocking by default")
+				return fmt.Errorf("blocked: non-interactive context with no trusted attestations")
+			}
 			return err
 		}
 

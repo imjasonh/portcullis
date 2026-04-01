@@ -89,7 +89,11 @@ func bashSyntaxCheck(input []byte) error {
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("%s", strings.TrimSpace(stderr.String()))
+		trimmed := strings.TrimSpace(stderr.String())
+		if trimmed != "" {
+			return fmt.Errorf("%s", trimmed)
+		}
+		return err
 	}
 	return nil
 }
