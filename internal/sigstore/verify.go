@@ -4,6 +4,10 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
+	"time"
+
+	"github.com/sigstore/sigstore-go/pkg/root"
+	"github.com/sigstore/sigstore-go/pkg/verify"
 )
 
 // ExtractIdentityFromCert extracts the signer identity from a PEM-encoded certificate.
@@ -34,11 +38,9 @@ func ExtractIdentityFromCert(certPEM []byte) (string, error) {
 	return "", fmt.Errorf("no identity found in certificate")
 }
 
-// VerifyCertificateIsLeaf performs basic validation that the certificate is a leaf
-// (not a CA) certificate. Full chain verification against the Fulcio root is handled
-// by sigstore-go's bundle verification and Rekor's inclusion proof — this function
-// is only a sanity check for certificate parsing paths.
-func VerifyCertificateIsLeaf(certPEM []byte) error {
+// VerifyCertificateChain verifies that a leaf certificate chains back to the
+// Sigstore Fulcio root using the TUF-distributed trusted root.
+func VerifyCertificateChain(certPEM []byte, observerTimestamp time.Time) error {
 	block, _ := pem.Decode(certPEM)
 	if block == nil {
 		return fmt.Errorf("no PEM block found")
@@ -53,5 +55,10 @@ func VerifyCertificateIsLeaf(certPEM []byte) error {
 		return fmt.Errorf("expected leaf certificate, got CA")
 	}
 
-	return nil
+	trustedRoot, err := root.FetchTrustedRoot()
+	if err != nil {
+		return fmt.Errorf("fetching Sigstore trusted root: %w", err)
+	}
+
+	return verify.VerifyLeafCertificate(observerTimestamp, cert, trustedRoot)
 }

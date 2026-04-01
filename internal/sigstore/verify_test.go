@@ -25,10 +25,10 @@ func generateTestCert(t *testing.T, email string, isCA bool) []byte {
 		Subject: pkix.Name{
 			CommonName: email,
 		},
-		EmailAddresses:    []string{email},
-		NotBefore:         time.Now(),
-		NotAfter:          time.Now().Add(10 * time.Minute),
-		IsCA:              isCA,
+		EmailAddresses:       []string{email},
+		NotBefore:            time.Now(),
+		NotAfter:             time.Now().Add(10 * time.Minute),
+		IsCA:                 isCA,
 		BasicConstraintsValid: true,
 	}
 
@@ -59,16 +59,26 @@ func TestExtractIdentityFromCert_NoPEM(t *testing.T) {
 	}
 }
 
-func TestVerifyCertificateIsLeaf_Leaf(t *testing.T) {
-	certPEM := generateTestCert(t, "alice@example.com", false)
-	if err := VerifyCertificateIsLeaf(certPEM); err != nil {
-		t.Errorf("expected leaf cert to pass: %v", err)
+func TestVerifyCertificateChain_CA(t *testing.T) {
+	certPEM := generateTestCert(t, "ca@example.com", true)
+	if err := VerifyCertificateChain(certPEM, time.Now()); err == nil {
+		t.Error("expected CA cert to fail verification")
 	}
 }
 
-func TestVerifyCertificateIsLeaf_CA(t *testing.T) {
-	certPEM := generateTestCert(t, "ca@example.com", true)
-	if err := VerifyCertificateIsLeaf(certPEM); err == nil {
-		t.Error("expected CA cert to fail verification")
+func TestVerifyCertificateChain_NoPEM(t *testing.T) {
+	if err := VerifyCertificateChain([]byte("not a cert"), time.Now()); err == nil {
+		t.Error("expected error for non-PEM input")
+	}
+}
+
+func TestVerifyCertificateChain_SelfSigned(t *testing.T) {
+	// A self-signed leaf cert won't chain to Fulcio root.
+	// This may fail with a network error (fetching TUF root) or a
+	// chain verification error — either is acceptable.
+	certPEM := generateTestCert(t, "alice@example.com", false)
+	err := VerifyCertificateChain(certPEM, time.Now())
+	if err == nil {
+		t.Error("expected self-signed cert to fail chain verification against Fulcio root")
 	}
 }
