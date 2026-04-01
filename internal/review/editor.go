@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"strings"
 )
 
 // OpenInEditor writes the script to a temp file and opens it in $EDITOR.
@@ -14,9 +13,6 @@ func OpenInEditor(script []byte) error {
 	if editorEnv == "" {
 		return fmt.Errorf("no $EDITOR set")
 	}
-	parts := strings.Fields(editorEnv)
-	editor := parts[0]
-	editorArgs := parts[1:]
 
 	f, err := os.CreateTemp("", "portcullis-review-*.sh")
 	if err != nil {
@@ -30,7 +26,8 @@ func OpenInEditor(script []byte) error {
 	}
 	f.Close()
 
-	cmd := exec.Command(editor, append(editorArgs, tmpFile)...)
+	// Use sh -c to handle complex $EDITOR values with quotes/arguments.
+	cmd := exec.Command("sh", "-c", editorEnv+" \"$@\"", "--", tmpFile)
 
 	// Connect to /dev/tty for interactive use.
 	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)

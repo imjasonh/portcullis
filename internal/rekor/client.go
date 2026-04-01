@@ -163,6 +163,11 @@ func parseHashedRekordEntry(spec json.RawMessage, timestamp time.Time) (*Attesta
 		return nil, fmt.Errorf("parsing hashedrekord spec: %w", err)
 	}
 
+	// Only process sha256 entries — other algorithms can't be matched against our hashes.
+	if hrekordSpec.Data.Hash.Algorithm != "" && hrekordSpec.Data.Hash.Algorithm != "sha256" {
+		return nil, fmt.Errorf("unsupported hash algorithm: %s", hrekordSpec.Data.Hash.Algorithm)
+	}
+
 	identity := extractIdentityFromB64PEM(hrekordSpec.Signature.PublicKey.Content)
 
 	return &Attestation{

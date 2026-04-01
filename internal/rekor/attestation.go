@@ -41,9 +41,10 @@ func FormatAttestationContext(attestations []Attestation, w io.Writer) {
 	approvals := 0
 	denials := 0
 	for _, att := range attestations {
-		if att.Verdict == "approve" {
+		switch att.Verdict {
+		case "approve":
 			approvals++
-		} else {
+		case "deny":
 			denials++
 		}
 	}

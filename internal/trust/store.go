@@ -14,7 +14,8 @@ import (
 // Store manages trusted identities persisted in a config file.
 type Store struct {
 	path string
-	// full is the parsed config file; we read/write the whole thing to preserve all sections.
+	// full is the parsed config file; [trust] and [policy] sections are preserved.
+	// Note: any other custom sections in config.toml will not survive a round-trip.
 	full   configFile
 	mu     sync.Mutex
 }

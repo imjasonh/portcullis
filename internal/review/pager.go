@@ -16,23 +16,16 @@ func DisplayInPager(script []byte, tty *os.File) error {
 		pager = "less"
 	}
 
-	// Split pager into command and arguments (e.g. "less -R").
-	parts := strings.Fields(pager)
-	if len(parts) == 0 {
-		return displayDirect(script, tty)
-	}
-
-	// Check if pager command is available.
-	if _, err := exec.LookPath(parts[0]); err != nil {
-		return displayDirect(script, tty)
-	}
-
-	cmd := exec.Command(parts[0], parts[1:]...)
+	// Use sh -c to handle complex $PAGER values with quotes/arguments.
+	cmd := exec.Command("sh", "-c", pager)
 	cmd.Stdin = strings.NewReader(string(script))
 	cmd.Stdout = tty
 	cmd.Stderr = tty
 
-	return cmd.Run()
+	if err := cmd.Run(); err != nil {
+		return displayDirect(script, tty)
+	}
+	return nil
 }
 
 // displayDirect prints the script with line numbers directly to the writer.

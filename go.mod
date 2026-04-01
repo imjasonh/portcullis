@@ -3,6 +3,7 @@ module github.com/imjasonh/portcullis
 go 1.24.7
 
 require (
+	github.com/BurntSushi/toml v1.6.0
 	github.com/sigstore/rekor v1.3.7
 	github.com/sigstore/sigstore v1.8.12
 	github.com/sigstore/sigstore-go v0.6.2
@@ -10,7 +11,6 @@ require (
 )
 
 require (
-	github.com/BurntSushi/toml v1.6.0 // indirect
 	github.com/asaskevich/govalidator v0.0.0-20230301143203-a9d515a09cc2 // indirect
 	github.com/blang/semver v3.5.1+incompatible // indirect
 	github.com/coreos/go-oidc/v3 v3.12.0 // indirect

@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/imjasonh/portcullis/internal/trust"
 	"github.com/spf13/cobra"
@@ -25,7 +26,11 @@ var trustAddCmd = &cobra.Command{
 		if err := store.Add(args[0]); err != nil {
 			return err
 		}
-		fmt.Fprintf(os.Stderr, "Added trusted identity: %s\n", args[0])
+		if strings.HasPrefix(args[0], "@") {
+			fmt.Fprintf(os.Stderr, "Added trusted domain: %s\n", args[0])
+		} else {
+			fmt.Fprintf(os.Stderr, "Added trusted identity: %s\n", args[0])
+		}
 		return nil
 	},
 }
@@ -42,7 +47,11 @@ var trustRemoveCmd = &cobra.Command{
 		if err := store.Remove(args[0]); err != nil {
 			return err
 		}
-		fmt.Fprintf(os.Stderr, "Removed trusted identity: %s\n", args[0])
+		if strings.HasPrefix(args[0], "@") {
+			fmt.Fprintf(os.Stderr, "Removed trusted domain: %s\n", args[0])
+		} else {
+			fmt.Fprintf(os.Stderr, "Removed trusted identity: %s\n", args[0])
+		}
 		return nil
 	},
 }
