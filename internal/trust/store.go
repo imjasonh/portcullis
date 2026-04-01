@@ -13,7 +13,9 @@ type Store struct {
 	path       string
 	identities []string
 	domains    []string
-	mu         sync.Mutex
+	// rawPolicy preserves [policy] and other non-trust sections from config.
+	rawPolicy string
+	mu        sync.Mutex
 }
 
 // NewStore creates a new trust store. If configDir is empty, uses default config path.
@@ -112,7 +114,7 @@ func (s *Store) load() error {
 		return err
 	}
 	// Simple TOML parser for our specific format.
-	s.identities, s.domains = parseTrustConfig(string(data))
+	s.identities, s.domains, s.rawPolicy = parseTrustConfig(string(data))
 	return nil
 }
 
@@ -122,23 +124,38 @@ func (s *Store) save() error {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return err
 	}
-	content := formatTrustConfig(s.identities, s.domains)
+	content := formatTrustConfig(s.identities, s.domains, s.rawPolicy)
 	return os.WriteFile(s.path, []byte(content), 0600)
 }
 
-// parseTrustConfig parses our TOML config format.
-func parseTrustConfig(data string) (identities []string, domains []string) {
+// parseTrustConfig parses our TOML config format and preserves non-trust sections.
+func parseTrustConfig(data string) (identities []string, domains []string, other string) {
 	lines := strings.Split(data, "\n")
+	inTrust := false
 	inIdentities := false
 	inDomains := false
+	var otherLines []string
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		switch {
 		case trimmed == "[trust]":
-			continue
-		case trimmed == "[policy]":
+			inTrust = true
 			inIdentities = false
 			inDomains = false
+			continue
+		case strings.HasPrefix(trimmed, "[") && trimmed != "[trust]":
+			inTrust = false
+			inIdentities = false
+			inDomains = false
+			otherLines = append(otherLines, line)
+			continue
+		}
+		if !inTrust {
+			otherLines = append(otherLines, line)
+			continue
+		}
+		// Inside [trust] section.
+		switch {
 		case strings.HasPrefix(trimmed, "identities"):
 			inIdentities = true
 			inDomains = false
@@ -161,11 +178,12 @@ func parseTrustConfig(data string) (identities []string, domains []string) {
 			}
 		}
 	}
+	other = strings.TrimSpace(strings.Join(otherLines, "\n"))
 	return
 }
 
-// formatTrustConfig produces our TOML config.
-func formatTrustConfig(identities []string, domains []string) string {
+// formatTrustConfig produces our TOML config, preserving non-trust sections.
+func formatTrustConfig(identities []string, domains []string, otherSections string) string {
 	var b strings.Builder
 	b.WriteString("[trust]\n")
 	b.WriteString("identities = [\n")
@@ -178,5 +196,10 @@ func formatTrustConfig(identities []string, domains []string) string {
 		fmt.Fprintf(&b, "    %q,\n", d)
 	}
 	b.WriteString("]\n")
+	if otherSections != "" {
+		b.WriteString("\n")
+		b.WriteString(otherSections)
+		b.WriteString("\n")
+	}
 	return b.String()
 }

@@ -3,7 +3,6 @@ package gate
 import (
 	"fmt"
 	"io"
-	"strings"
 
 	"github.com/imjasonh/portcullis/internal/rekor"
 	"github.com/imjasonh/portcullis/internal/trust"
@@ -71,7 +70,7 @@ func Decide(attestations []rekor.Attestation, trustStore *trust.Store, stderr io
 
 	// No trusted signals — needs review.
 	if len(untrusted) > 0 {
-		printUntrustedContext(untrusted, stderr)
+		rekor.FormatAttestationContext(untrusted, stderr)
 	}
 
 	return DecisionResult{
@@ -81,48 +80,3 @@ func Decide(attestations []rekor.Attestation, trustStore *trust.Store, stderr io
 	}
 }
 
-func printUntrustedContext(attestations []rekor.Attestation, stderr io.Writer) {
-	approvals := 0
-	denials := 0
-	for _, att := range attestations {
-		if att.Verdict == "approve" {
-			approvals++
-		} else {
-			denials++
-		}
-	}
-
-	if approvals > 0 {
-		fmt.Fprintf(stderr, "portcullis: %d unknown %s approved this:\n",
-			approvals, pluralize("identity", approvals))
-		for _, att := range attestations {
-			if att.Verdict == "approve" {
-				fmt.Fprintf(stderr, "  - %s (%s)\n", att.Identity, att.Timestamp.Format("2006-01-02"))
-			}
-		}
-	}
-
-	if denials > 0 {
-		fmt.Fprintf(stderr, "portcullis: %d unknown %s flagged this:\n",
-			denials, pluralize("identity", denials))
-		for _, att := range attestations {
-			if att.Verdict == "deny" {
-				msg := fmt.Sprintf("  - %s (%s)", att.Identity, att.Timestamp.Format("2006-01-02"))
-				if att.Reason != "" {
-					msg += fmt.Sprintf(": '%s'", att.Reason)
-				}
-				fmt.Fprintln(stderr, msg)
-			}
-		}
-	}
-}
-
-func pluralize(word string, count int) string {
-	if count == 1 {
-		return word
-	}
-	if strings.HasSuffix(word, "y") {
-		return word[:len(word)-1] + "ies"
-	}
-	return word + "s"
-}

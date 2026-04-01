@@ -1,6 +1,11 @@
 package rekor
 
-import "time"
+import (
+	"fmt"
+	"io"
+	"strings"
+	"time"
+)
 
 // Attestation represents a portcullis attestation stored in Rekor.
 type Attestation struct {
@@ -29,4 +34,52 @@ func NewAttestation(hash, verdict, identity, reason string) Attestation {
 		Reason:    reason,
 		Timestamp: time.Now(),
 	}
+}
+
+// FormatAttestationContext writes a summary of untrusted attestations to w.
+func FormatAttestationContext(attestations []Attestation, w io.Writer) {
+	approvals := 0
+	denials := 0
+	for _, att := range attestations {
+		if att.Verdict == "approve" {
+			approvals++
+		} else {
+			denials++
+		}
+	}
+
+	if approvals > 0 {
+		fmt.Fprintf(w, "%d unknown %s approved this:\n",
+			approvals, Pluralize("identity", approvals))
+		for _, att := range attestations {
+			if att.Verdict == "approve" {
+				fmt.Fprintf(w, "  - %s (%s)\n", att.Identity, att.Timestamp.Format("2006-01-02"))
+			}
+		}
+	}
+
+	if denials > 0 {
+		fmt.Fprintf(w, "%d unknown %s flagged this:\n",
+			denials, Pluralize("identity", denials))
+		for _, att := range attestations {
+			if att.Verdict == "deny" {
+				msg := fmt.Sprintf("  - %s (%s)", att.Identity, att.Timestamp.Format("2006-01-02"))
+				if att.Reason != "" {
+					msg += fmt.Sprintf(": '%s'", att.Reason)
+				}
+				fmt.Fprintln(w, msg)
+			}
+		}
+	}
+}
+
+// Pluralize returns the plural form of a word based on count.
+func Pluralize(word string, count int) string {
+	if count == 1 {
+		return word
+	}
+	if strings.HasSuffix(word, "y") {
+		return word[:len(word)-1] + "ies"
+	}
+	return word + "s"
 }

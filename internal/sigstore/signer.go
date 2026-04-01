@@ -54,6 +54,9 @@ func Authenticate(stderr io.Writer) (*oauthflow.OIDCIDToken, error) {
 // SignAndPublish signs an attestation payload using sigstore-go's Bundle flow:
 // ephemeral keypair → Fulcio certificate → Rekor transparency log entry.
 // The signed bundle is self-contained and publicly auditable.
+//
+// Uses a DSSE envelope so Rekor indexes the entry by the script hash (the subject),
+// making it discoverable via hash-based queries.
 func SignAndPublish(ctx context.Context, payload AttestationPayload, idToken string, stderr io.Writer) error {
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
@@ -66,10 +69,12 @@ func SignAndPublish(ctx context.Context, payload AttestationPayload, idToken str
 		return fmt.Errorf("creating ephemeral keypair: %w", err)
 	}
 
-	// The attestation payload is the content to sign.
-	// Using PlainData creates a hashedrekord entry in Rekor, indexed by the
-	// SHA-256 of the payload (which contains the script hash).
-	content := &sign.PlainData{Data: payloadBytes}
+	// Use a DSSE envelope so Rekor indexes by the script hash (the subject).
+	// PlainData would index by sha256(payload), which doesn't match our query hash.
+	content := &sign.DSSEData{
+		Data:        payloadBytes,
+		PayloadType: AttestationPayloadType,
+	}
 
 	// Fulcio: get a short-lived signing certificate bound to the OIDC identity.
 	fulcio := sign.NewFulcio(&sign.FulcioOptions{

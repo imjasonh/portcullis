@@ -107,12 +107,12 @@ func (g *Gate) Run(input []byte, stdout io.Writer, stderr io.Writer) error {
 
 		switch result.Verdict {
 		case VerdictApprove:
-			g.cacheDecision(hash, "approve", "attested", "", "")
+			g.cacheDecision(hash, "approve", "attested", "", "", stderr)
 			_, err := stdout.Write(input)
 			return err
 
 		case VerdictDeny:
-			g.cacheDecision(hash, "deny", "attested", "", result.Reason)
+			g.cacheDecision(hash, "deny", "attested", "", result.Reason, stderr)
 			return fmt.Errorf("blocked: %s", result.Reason)
 
 		case VerdictReview:
@@ -179,7 +179,7 @@ func (g *Gate) handleReview(input []byte, hash string, untrusted []rekor.Attesta
 					source = "attested"
 				}
 			}
-			g.cacheDecision(hash, "approve", source, "", "")
+			g.cacheDecision(hash, "approve", source, "", "", stderr)
 			_, err := stdout.Write(input)
 			return err
 		case "deny":
@@ -191,14 +191,14 @@ func (g *Gate) handleReview(input []byte, hash string, untrusted []rekor.Attesta
 					source = "attested"
 				}
 			}
-			g.cacheDecision(hash, "deny", source, "", reason)
+			g.cacheDecision(hash, "deny", source, "", reason, stderr)
 			return fmt.Errorf("blocked by user")
 		case "run":
-			g.cacheDecision(hash, "approve", "local", "", "")
+			g.cacheDecision(hash, "approve", "local", "", "", stderr)
 			_, err := stdout.Write(input)
 			return err
 		case "block":
-			g.cacheDecision(hash, "deny", "local", "", reason)
+			g.cacheDecision(hash, "deny", "local", "", reason, stderr)
 			return fmt.Errorf("blocked by user")
 		}
 	}
@@ -208,17 +208,19 @@ func (g *Gate) handleReview(input []byte, hash string, untrusted []rekor.Attesta
 	return fmt.Errorf("blocked: non-interactive context with no trusted attestations")
 }
 
-func (g *Gate) cacheDecision(hash, verdict, source, identity, reason string) {
+func (g *Gate) cacheDecision(hash, verdict, source, identity, reason string, stderr io.Writer) {
 	if g.Cache == nil {
 		return
 	}
-	g.Cache.Store(cache.Decision{
+	if err := g.Cache.Store(cache.Decision{
 		ScriptHash: hash,
 		Verdict:    verdict,
 		Source:     source,
 		Identity:   identity,
 		Reason:     reason,
-	})
+	}); err != nil {
+		fmt.Fprintf(stderr, "portcullis: warning: failed to cache decision: %v\n", err)
+	}
 }
 
 // ComputeHash returns the hex-encoded SHA-256 hash of the input.

@@ -126,7 +126,13 @@ func (c *Cache) save() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(c.path, data, 0600)
+	// Atomic write: write to temp file, then rename into place.
+	// This prevents corruption if the process crashes mid-write.
+	tmp := c.path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, c.path)
 }
 
 func defaultConfigDir() string {

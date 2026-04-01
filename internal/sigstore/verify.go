@@ -34,9 +34,11 @@ func ExtractIdentityFromCert(certPEM []byte) (string, error) {
 	return "", fmt.Errorf("no identity found in certificate")
 }
 
-// VerifyCertificateChain verifies that a certificate chains back to the Sigstore Fulcio root.
-// In production, this would verify against the TUF-distributed Fulcio root certificate.
-func VerifyCertificateChain(certPEM []byte) error {
+// VerifyCertificateIsLeaf performs basic validation that the certificate is a leaf
+// (not a CA) certificate. Full chain verification against the Fulcio root is handled
+// by sigstore-go's bundle verification and Rekor's inclusion proof — this function
+// is only a sanity check for certificate parsing paths.
+func VerifyCertificateIsLeaf(certPEM []byte) error {
 	block, _ := pem.Decode(certPEM)
 	if block == nil {
 		return fmt.Errorf("no PEM block found")
@@ -47,8 +49,6 @@ func VerifyCertificateChain(certPEM []byte) error {
 		return fmt.Errorf("parsing certificate: %w", err)
 	}
 
-	// Basic validity check — Fulcio certs are short-lived (10 min).
-	// The actual trust verification is done by Rekor's inclusion proof.
 	if cert.IsCA {
 		return fmt.Errorf("expected leaf certificate, got CA")
 	}

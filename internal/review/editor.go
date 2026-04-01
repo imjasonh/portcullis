@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 )
 
 // OpenInEditor writes the script to a temp file and opens it in $EDITOR.
@@ -15,12 +14,17 @@ func OpenInEditor(script []byte) error {
 		return fmt.Errorf("no $EDITOR set")
 	}
 
-	tmpDir := os.TempDir()
-	tmpFile := filepath.Join(tmpDir, "portcullis-review.sh")
-	if err := os.WriteFile(tmpFile, script, 0600); err != nil {
+	f, err := os.CreateTemp("", "portcullis-review-*.sh")
+	if err != nil {
+		return fmt.Errorf("creating temp file: %w", err)
+	}
+	tmpFile := f.Name()
+	defer os.Remove(tmpFile)
+	if _, err := f.Write(script); err != nil {
+		f.Close()
 		return fmt.Errorf("writing temp file: %w", err)
 	}
-	defer os.Remove(tmpFile)
+	f.Close()
 
 	cmd := exec.Command(editor, tmpFile)
 

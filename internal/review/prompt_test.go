@@ -31,13 +31,13 @@ func TestPrintAttestationContext(t *testing.T) {
 }
 
 func TestPluralize(t *testing.T) {
-	if pluralize("identity", 1) != "identity" {
+	if rekor.Pluralize("identity", 1) != "identity" {
 		t.Error("expected singular")
 	}
-	if pluralize("identity", 2) != "identities" {
+	if rekor.Pluralize("identity", 2) != "identities" {
 		t.Error("expected plural")
 	}
-	if pluralize("identity", 0) != "identities" {
+	if rekor.Pluralize("identity", 0) != "identities" {
 		t.Error("expected plural for zero")
 	}
 }

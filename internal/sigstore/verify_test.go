@@ -59,16 +59,16 @@ func TestExtractIdentityFromCert_NoPEM(t *testing.T) {
 	}
 }
 
-func TestVerifyCertificateChain_Leaf(t *testing.T) {
+func TestVerifyCertificateIsLeaf_Leaf(t *testing.T) {
 	certPEM := generateTestCert(t, "alice@example.com", false)
-	if err := VerifyCertificateChain(certPEM); err != nil {
+	if err := VerifyCertificateIsLeaf(certPEM); err != nil {
 		t.Errorf("expected leaf cert to pass: %v", err)
 	}
 }
 
-func TestVerifyCertificateChain_CA(t *testing.T) {
+func TestVerifyCertificateIsLeaf_CA(t *testing.T) {
 	certPEM := generateTestCert(t, "ca@example.com", true)
-	if err := VerifyCertificateChain(certPEM); err == nil {
+	if err := VerifyCertificateIsLeaf(certPEM); err == nil {
 		t.Error("expected CA cert to fail verification")
 	}
 }

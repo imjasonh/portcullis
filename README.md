@@ -47,7 +47,7 @@ When you pipe a script through portcullis:
 1. **Buffer** — reads all of stdin
 2. **Validate** — checks for binary content, verifies it looks like shell, runs `bash -n` syntax check
 3. **Hash** — computes SHA-256 of the content
-4. **Cache check** — looks up the hash in local SQLite cache (24h TTL)
+4. **Cache check** — looks up the hash in local JSON cache (24h TTL)
 5. **Rekor query** — searches the Sigstore transparency log for attestations
 6. **Decision** — evaluates attestations against your trust list:
    - **Trusted deny** → block immediately
@@ -109,4 +109,4 @@ ln -s portcullis pc  # optional: create short alias
 
 ## Status
 
-This is an early implementation. Sigstore signing and Rekor submission are stubbed — the core pipeline (validation, caching, trust management, decision engine, interactive review) is fully functional.
+This is an experimental implementation. Sigstore signing (via sigstore-go) and Rekor submission are integrated but not yet battle-tested — the core pipeline (validation, caching, trust management, decision engine, interactive review) is fully functional.
