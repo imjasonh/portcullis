@@ -107,6 +107,11 @@ func (g *Gate) Run(input []byte, stdout io.Writer, stderr io.Writer) error {
 
 		switch result.Verdict {
 		case VerdictApprove:
+			// Apply on_positive policy: "review" forces interactive review even with trusted approval.
+			if g.Policy.OnPositive == "review" {
+				fmt.Fprintln(stderr, "portcullis: trusted approval found, but policy requires review")
+				return g.handleReview(input, hash, result.Untrusted, rekorFailed, stdout, stderr)
+			}
 			if err := g.cacheDecision(hash, "approve", "attested", "", ""); err != nil {
 				fmt.Fprintf(stderr, "portcullis: warning: failed to cache decision: %v\n", err)
 			}
@@ -114,6 +119,15 @@ func (g *Gate) Run(input []byte, stdout io.Writer, stderr io.Writer) error {
 			return err
 
 		case VerdictDeny:
+			// Apply on_negative policy: "warn" logs warning but passes through instead of blocking.
+			if g.Policy.OnNegative == "warn" {
+				fmt.Fprintf(stderr, "portcullis: WARNING — %s (passing through per policy)\n", result.Reason)
+				if err := g.cacheDecision(hash, "deny", "attested", "", result.Reason); err != nil {
+					fmt.Fprintf(stderr, "portcullis: warning: failed to cache decision: %v\n", err)
+				}
+				_, err := stdout.Write(input)
+				return err
+			}
 			if err := g.cacheDecision(hash, "deny", "attested", "", result.Reason); err != nil {
 				fmt.Fprintf(stderr, "portcullis: warning: failed to cache decision: %v\n", err)
 			}
@@ -164,6 +178,10 @@ func (g *Gate) handleReview(input []byte, hash string, untrusted []rekor.Attesta
 		fmt.Fprintln(stderr, "portcullis: WARNING — no trusted attestations found, passing through per policy")
 		_, err := stdout.Write(input)
 		return err
+	}
+
+	if rekorFailed {
+		fmt.Fprintln(stderr, "portcullis: note: Rekor was unreachable, attestation context may be incomplete")
 	}
 
 	// Interactive review.

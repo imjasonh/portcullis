@@ -3,8 +3,9 @@ package config
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
+
+	"github.com/BurntSushi/toml"
 )
 
 // Policy controls how portcullis responds to different attestation states.
@@ -34,52 +35,44 @@ func ConfigDir() string {
 	return filepath.Join(home, ".config", "portcullis")
 }
 
+// configFile is the TOML structure for the config file.
+type configFile struct {
+	Policy policySection `toml:"policy"`
+}
+
+type policySection struct {
+	OnNegative string `toml:"on_negative"`
+	OnPositive string `toml:"on_positive"`
+	OnUnknown  string `toml:"on_unknown"`
+	CacheTTL   string `toml:"cache_ttl"`
+}
+
 // LoadPolicy loads policy from the config file, falling back to defaults.
 func LoadPolicy(configDir string) Policy {
 	p := DefaultPolicy()
 	if configDir == "" {
 		configDir = ConfigDir()
 	}
-	data, err := os.ReadFile(filepath.Join(configDir, "config.toml"))
-	if err != nil {
+
+	var cfg configFile
+	if _, err := toml.DecodeFile(filepath.Join(configDir, "config.toml"), &cfg); err != nil {
 		return p
 	}
-	parsePolicy(string(data), &p)
-	return p
-}
 
-func parsePolicy(data string, p *Policy) {
-	inPolicy := false
-	for _, line := range strings.Split(data, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "[policy]" {
-			inPolicy = true
-			continue
-		}
-		if strings.HasPrefix(trimmed, "[") {
-			inPolicy = false
-			continue
-		}
-		if !inPolicy {
-			continue
-		}
-		parts := strings.SplitN(trimmed, "=", 2)
-		if len(parts) != 2 {
-			continue
-		}
-		key := strings.TrimSpace(parts[0])
-		val := strings.Trim(strings.TrimSpace(parts[1]), "\"")
-		switch key {
-		case "on_negative":
-			p.OnNegative = val
-		case "on_positive":
-			p.OnPositive = val
-		case "on_unknown":
-			p.OnUnknown = val
-		case "cache_ttl":
-			if d, err := time.ParseDuration(val); err == nil {
-				p.CacheTTL = d
-			}
+	if cfg.Policy.OnNegative != "" {
+		p.OnNegative = cfg.Policy.OnNegative
+	}
+	if cfg.Policy.OnPositive != "" {
+		p.OnPositive = cfg.Policy.OnPositive
+	}
+	if cfg.Policy.OnUnknown != "" {
+		p.OnUnknown = cfg.Policy.OnUnknown
+	}
+	if cfg.Policy.CacheTTL != "" {
+		if d, err := time.ParseDuration(cfg.Policy.CacheTTL); err == nil {
+			p.CacheTTL = d
 		}
 	}
+
+	return p
 }

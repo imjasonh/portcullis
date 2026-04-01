@@ -174,10 +174,13 @@ func parseHashedRekordEntry(spec json.RawMessage, timestamp time.Time) (*Attesta
 	}, nil
 }
 
-// parseDSSEEntry extracts identity from a DSSE entry.
+// parseDSSEEntry extracts identity, verdict, reason, and subject from a DSSE entry
+// by decoding the envelope payload.
 func parseDSSEEntry(spec json.RawMessage, timestamp time.Time) (*Attestation, error) {
 	var dsseSpec struct {
-		Signatures []struct {
+		PayloadType string `json:"payloadType"`
+		Payload     string `json:"payload"`
+		Signatures  []struct {
 			Verifier string `json:"verifier"`
 		} `json:"signatures"`
 	}
@@ -192,12 +195,42 @@ func parseDSSEEntry(spec json.RawMessage, timestamp time.Time) (*Attestation, er
 		}
 	}
 
-	return &Attestation{
+	att := &Attestation{
 		Type:      AttestationType,
 		Identity:  identity,
 		Timestamp: timestamp,
-		Verdict:   "approve",
-	}, nil
+		Verdict:   "approve", // default if payload can't be parsed
+	}
+
+	// Try to decode the DSSE payload for portcullis attestation fields.
+	if dsseSpec.Payload != "" {
+		payloadBytes, err := base64.StdEncoding.DecodeString(dsseSpec.Payload)
+		if err == nil {
+			var payload struct {
+				ScriptHash string `json:"script_hash"`
+				Verdict    string `json:"verdict"`
+				Reason     string `json:"reason"`
+			}
+			if json.Unmarshal(payloadBytes, &payload) == nil {
+				if payload.Verdict != "" {
+					att.Verdict = payload.Verdict
+				}
+				if payload.Reason != "" {
+					att.Reason = payload.Reason
+				}
+				if payload.ScriptHash != "" {
+					// Strip "sha256:" prefix if present.
+					h := payload.ScriptHash
+					if len(h) > 7 && h[:7] == "sha256:" {
+						h = h[7:]
+					}
+					att.Subject = Subject{SHA256: h}
+				}
+			}
+		}
+	}
+
+	return att, nil
 }
 
 // extractIdentityFromB64PEM decodes base64, then extracts identity from PEM cert.

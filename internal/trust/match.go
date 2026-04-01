@@ -9,14 +9,14 @@ func (s *Store) IsTrusted(identity string) bool {
 	defer s.mu.Unlock()
 
 	// Exact email match.
-	for _, id := range s.identities {
+	for _, id := range s.full.Trust.Identities {
 		if id == identity {
 			return true
 		}
 	}
 
 	// Domain suffix match.
-	for _, domain := range s.domains {
+	for _, domain := range s.full.Trust.Domains {
 		suffix := domain // e.g., "@chainguard.dev"
 		if strings.HasSuffix(identity, suffix) {
 			return true

@@ -1,21 +1,41 @@
 package trust
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"github.com/BurntSushi/toml"
 )
 
 // Store manages trusted identities persisted in a config file.
 type Store struct {
-	path       string
-	identities []string
-	domains    []string
-	// rawPolicy preserves [policy] and other non-trust sections from config.
-	rawPolicy string
-	mu        sync.Mutex
+	path string
+	// full is the parsed config file; we read/write the whole thing to preserve all sections.
+	full   configFile
+	mu     sync.Mutex
+}
+
+// configFile mirrors the TOML structure we persist.
+type configFile struct {
+	Trust   trustSection   `toml:"trust"`
+	Policy  policySection  `toml:"policy,omitempty"`
+}
+
+type trustSection struct {
+	Identities []string `toml:"identities"`
+	Domains    []string `toml:"domains"`
+}
+
+// policySection is kept opaque so we round-trip it without loss.
+type policySection struct {
+	OnNegative string `toml:"on_negative,omitempty"`
+	OnPositive string `toml:"on_positive,omitempty"`
+	OnUnknown  string `toml:"on_unknown,omitempty"`
+	CacheTTL   string `toml:"cache_ttl,omitempty"`
 }
 
 // NewStore creates a new trust store. If configDir is empty, uses default config path.
@@ -47,19 +67,19 @@ func (s *Store) Add(identity string) error {
 	defer s.mu.Unlock()
 
 	if strings.HasPrefix(identity, "@") {
-		for _, d := range s.domains {
+		for _, d := range s.full.Trust.Domains {
 			if d == identity {
 				return fmt.Errorf("domain %s already trusted", identity)
 			}
 		}
-		s.domains = append(s.domains, identity)
+		s.full.Trust.Domains = append(s.full.Trust.Domains, identity)
 	} else {
-		for _, id := range s.identities {
+		for _, id := range s.full.Trust.Identities {
 			if id == identity {
 				return fmt.Errorf("identity %s already trusted", identity)
 			}
 		}
-		s.identities = append(s.identities, identity)
+		s.full.Trust.Identities = append(s.full.Trust.Identities, identity)
 	}
 	return s.save()
 }
@@ -71,9 +91,9 @@ func (s *Store) Remove(identity string) error {
 
 	if strings.HasPrefix(identity, "@") {
 		found := false
-		for i, d := range s.domains {
+		for i, d := range s.full.Trust.Domains {
 			if d == identity {
-				s.domains = append(s.domains[:i], s.domains[i+1:]...)
+				s.full.Trust.Domains = append(s.full.Trust.Domains[:i], s.full.Trust.Domains[i+1:]...)
 				found = true
 				break
 			}
@@ -83,9 +103,9 @@ func (s *Store) Remove(identity string) error {
 		}
 	} else {
 		found := false
-		for i, id := range s.identities {
+		for i, id := range s.full.Trust.Identities {
 			if id == identity {
-				s.identities = append(s.identities[:i], s.identities[i+1:]...)
+				s.full.Trust.Identities = append(s.full.Trust.Identities[:i], s.full.Trust.Identities[i+1:]...)
 				found = true
 				break
 			}
@@ -101,7 +121,7 @@ func (s *Store) Remove(identity string) error {
 func (s *Store) List() (identities []string, domains []string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return append([]string{}, s.identities...), append([]string{}, s.domains...)
+	return append([]string{}, s.full.Trust.Identities...), append([]string{}, s.full.Trust.Domains...)
 }
 
 // load reads the config file and populates the store.
@@ -113,93 +133,22 @@ func (s *Store) load() error {
 	if err != nil {
 		return err
 	}
-	// Simple TOML parser for our specific format.
-	s.identities, s.domains, s.rawPolicy = parseTrustConfig(string(data))
+	if _, err := toml.Decode(string(data), &s.full); err != nil {
+		return fmt.Errorf("parsing config: %w", err)
+	}
 	return nil
 }
 
-// save writes the trust config to disk.
+// save writes the full config to disk, preserving all sections.
 func (s *Store) save() error {
 	dir := filepath.Dir(s.path)
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return err
 	}
-	content := formatTrustConfig(s.identities, s.domains, s.rawPolicy)
-	return os.WriteFile(s.path, []byte(content), 0600)
-}
-
-// parseTrustConfig parses our TOML config format and preserves non-trust sections.
-func parseTrustConfig(data string) (identities []string, domains []string, other string) {
-	lines := strings.Split(data, "\n")
-	inTrust := false
-	inIdentities := false
-	inDomains := false
-	var otherLines []string
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		switch {
-		case trimmed == "[trust]":
-			inTrust = true
-			inIdentities = false
-			inDomains = false
-			continue
-		case strings.HasPrefix(trimmed, "[") && trimmed != "[trust]":
-			inTrust = false
-			inIdentities = false
-			inDomains = false
-			otherLines = append(otherLines, line)
-			continue
-		}
-		if !inTrust {
-			otherLines = append(otherLines, line)
-			continue
-		}
-		// Inside [trust] section.
-		switch {
-		case strings.HasPrefix(trimmed, "identities"):
-			inIdentities = true
-			inDomains = false
-		case strings.HasPrefix(trimmed, "domains"):
-			inDomains = true
-			inIdentities = false
-		case strings.HasPrefix(trimmed, "]"):
-			if inIdentities {
-				inIdentities = false
-			}
-			if inDomains {
-				inDomains = false
-			}
-		case strings.HasPrefix(trimmed, "\""):
-			val := strings.Trim(trimmed, "\", ")
-			if inIdentities {
-				identities = append(identities, val)
-			} else if inDomains {
-				domains = append(domains, val)
-			}
-		}
+	var buf bytes.Buffer
+	enc := toml.NewEncoder(&buf)
+	if err := enc.Encode(s.full); err != nil {
+		return fmt.Errorf("encoding config: %w", err)
 	}
-	other = strings.TrimSpace(strings.Join(otherLines, "\n"))
-	return
-}
-
-// formatTrustConfig produces our TOML config, preserving non-trust sections.
-func formatTrustConfig(identities []string, domains []string, otherSections string) string {
-	var b strings.Builder
-	b.WriteString("[trust]\n")
-	b.WriteString("identities = [\n")
-	for _, id := range identities {
-		fmt.Fprintf(&b, "    %q,\n", id)
-	}
-	b.WriteString("]\n")
-	b.WriteString("domains = [\n")
-	for _, d := range domains {
-		fmt.Fprintf(&b, "    %q,\n", d)
-	}
-	b.WriteString("]\n")
-	if otherSections != "" {
-		b.WriteString("\n")
-		b.WriteString(otherSections)
-		b.WriteString("\n")
-	}
-	return b.String()
+	return os.WriteFile(s.path, buf.Bytes(), 0600)
 }

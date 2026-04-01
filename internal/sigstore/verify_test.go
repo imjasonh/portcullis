@@ -72,10 +72,11 @@ func TestVerifyCertificateChain_NoPEM(t *testing.T) {
 	}
 }
 
-func TestVerifyCertificateChain_SelfSigned(t *testing.T) {
+func TestVerifyCertificateChain_SelfSigned_Integration(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test that requires network (fetches TUF root)")
+	}
 	// A self-signed leaf cert won't chain to Fulcio root.
-	// This may fail with a network error (fetching TUF root) or a
-	// chain verification error — either is acceptable.
 	certPEM := generateTestCert(t, "alice@example.com", false)
 	err := VerifyCertificateChain(certPEM, time.Now())
 	if err == nil {
