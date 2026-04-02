@@ -13,7 +13,7 @@
 
 Portcullis is a CLI tool that interposes in shell script execution pipelines to verify trust before allowing execution. It uses Sigstore for identity and Rekor as a public transparency log for trust attestations.
 
-A lot of words have been written about the relative insecurity of doing `curl | bash`, and I won't write more here. Suffice to say, the people seem to like the convenience of it. I wondered if there was a way to get the usability benefit of it, without the security issues about blind code execution. Portcullis is an experiment to try to get the best of both worlds.
+A lot of words have been written about the relative insecurity of doing `curl | bash`, and I won't write more here ([here's some good ones!](https://sandstorm.io/news/2015-09-24-is-curl-bash-insecure-pgp-verified-install)). Suffice to say, the people seem to like the convenience of it. I wondered if there was a way to get the usability benefit of it, without the security issues about blind code execution. Portcullis is an experiment to try to get the best of both worlds.
 
 ## Install
 
