@@ -96,6 +96,18 @@ func (c *Cache) Store(d Decision) error {
 	return c.save()
 }
 
+// Clean removes the cache file.
+func (c *Cache) Clean() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if err := os.Remove(c.path); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	c.entries = make(map[string]Decision)
+	return nil
+}
+
 // Close is a no-op for the JSON cache (kept for interface compatibility).
 func (c *Cache) Close() error {
 	return nil

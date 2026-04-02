@@ -87,7 +87,7 @@ func SignAndPublish(ctx context.Context, payload AttestationPayload, idToken str
 	})
 
 	fmt.Fprintln(stderr, "portcullis: signing attestation via Sigstore (Fulcio + Rekor)...")
-	_, err = sign.Bundle(content, keypair, sign.BundleOptions{
+	bundle, err := sign.Bundle(content, keypair, sign.BundleOptions{
 		Context:             ctx,
 		CertificateProvider: fulcio,
 		CertificateProviderOptions: &sign.CertificateProviderOptions{
@@ -99,6 +99,10 @@ func SignAndPublish(ctx context.Context, payload AttestationPayload, idToken str
 		return fmt.Errorf("signing bundle: %w", err)
 	}
 
-	fmt.Fprintln(stderr, "portcullis: attestation signed and logged to Rekor")
+	if tlog := bundle.GetVerificationMaterial().GetTlogEntries(); len(tlog) > 0 {
+		logIndex := tlog[0].GetLogIndex()
+		fmt.Fprintf(stderr, "portcullis: logged to Rekor at index %d\n", logIndex)
+		fmt.Fprintf(stderr, "portcullis: https://search.sigstore.dev/?logIndex=%d\n", logIndex)
+	}
 	return nil
 }

@@ -27,6 +27,7 @@ func init() {
 	rootCmd.AddCommand(attestCmd)
 	rootCmd.AddCommand(queryCmd)
 	rootCmd.AddCommand(authCmd)
+	rootCmd.AddCommand(cleanCmd)
 }
 
 // Execute runs the root command.
