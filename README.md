@@ -1,8 +1,23 @@
 # Portcullis
 
+
+<p align=center>
+<img align=center width="20%" src="https://github.com/user-attachments/assets/92891d6a-b11d-4d88-aaa5-982716e3e631">
+</p>
+
+<p align=center>
+<i>Portcullis (n.): a thing that keeps the bad stuff out of the place.</i>
+</p>
+
 **Your machine is a castle. `curl | bash` is an open gate. Portcullis drops the gate and inspects what's trying to enter.**
 
 Portcullis is a CLI tool that interposes in shell script execution pipelines to verify trust before allowing execution. It uses Sigstore for identity and Rekor as a public transparency log for trust attestations.
+
+## Install
+
+```bash
+go install github.com/imjasonh/portcullis@latest
+```
 
 ## Usage
 
@@ -10,19 +25,20 @@ Portcullis is a CLI tool that interposes in shell script execution pipelines to 
 # Primary use case: gate piped scripts
 curl https://example.com/install.sh | portcullis | bash
 
-# Short alias
-curl https://example.com/install.sh | pc | bash
-
 # Also works with redirects
 portcullis < install.sh | bash
 ```
+
+`portcullis` buffers stdin and checks the [Rekor](https://docs.sigstore.dev/logging/overview/) transparency log for determinations about that content by its SHA-256 digest. If someone you trust has approved the contents, it will be passed through to `bash`. If someone you know has reported it as malicious, it will be blocked.
+
+If your trusted users haven't approved or denied, you will be shown the contents and asked to approve or deny, and your decision will be written to Rekor for future `portcullis` users.
 
 ### Trust Management
 
 ```bash
 # Add trusted identities
 portcullis trust add alice@example.com
-portcullis trust add @chainguard.dev    # trust all emails from a domain
+portcullis trust add @example.com    # trust all emails from a domain
 
 # List and remove
 portcullis trust list
@@ -53,7 +69,7 @@ When you pipe a script through portcullis:
    - **Trusted deny** → block immediately
    - **Trusted approve** → pass through to stdout
    - **No trusted signals** → interactive review
-7. **Interactive review** — opens the script in your `$EDITOR`, shows attestation context, and prompts:
+7. **Interactive review** — opens the script in your configured `$EDITOR`, shows attestation context, and prompts:
    - `[a]` Approve + attest (sign and publish to Rekor)
    - `[d]` Deny + attest (sign and publish to Rekor)
    - `[r]` Run anyway (cache locally, no attestation)
@@ -89,10 +105,9 @@ cache_ttl   = "24h"
 - **Silent supply chain changes** — new content = new hash = no cached approval
 
 ### Does NOT protect against
-- Compromised Sigstore identities
-- Local cache tampering (mitigated: cache is convenience, Rekor is trust boundary)
-- Sophisticated obfuscation (`bash -n` catches syntax, not semantics)
-- Runtime payload downloads (gates initial script only)
+- Compromised Sigstore identities (someone hacking `alice@example.com`'s account to approve a malicious script)
+- Sophisticated obfuscation; you are responsible for reviewing and understanding the script
+- Runtime payload downloads; if the script downloads something else, `portcullis` won't block that
 
 ### Security properties
 - All attestations are publicly auditable in Rekor's append-only log
